@@ -2,6 +2,8 @@ from random import randint
 import sys, traceback, threading, socket
 
 from VideoStream import VideoStream
+from VideoStreamHD import VideoStreamHD
+from VideoLoader import load_video
 from RtpPacket import RtpPacket
 
 class ServerWorker:
@@ -56,7 +58,7 @@ class ServerWorker:
 				print("processing SETUP\n")
 				
 				try:
-					self.clientInfo['videoStream'] = VideoStream(filename)
+					self.clientInfo['videoStream'] = load_video(filename)
 					self.state = self.READY
 				except IOError:
 					print(f"File {filename} not found")
