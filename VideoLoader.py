@@ -2,7 +2,7 @@ from VideoStream import VideoStream
 from VideoStreamHD import VideoStreamHD
 
 def is_basic_mjpeg(filename):
-    """5 byte đầu là ASCII digits => dạng MJPEG basic của lab."""
+    """5 byte đầu là ASCII digits."""
     with open(filename, 'rb') as f:
         first5 = f.read(5)
         if len(first5) < 5:

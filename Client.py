@@ -229,7 +229,7 @@ class Client:
             print(f"Error updating movie: {e}")
 
     # ----------------------------------------------------
-    # Progress bar giống YouTube
+    # Progress bar
     # ----------------------------------------------------
     def updateProgressBar(self):
 
