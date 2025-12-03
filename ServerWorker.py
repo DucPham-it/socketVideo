@@ -145,8 +145,9 @@ class ServerWorker:
                 except Exception as e:
                     print(f"Connection Error: {e}")
             else:
-                print("End of stream, resetting...")
-                self.clientInfo['videoStream'].reset()
+                print("End of stream, stopping stream...")
+                self.clientInfo['event'].set()
+                break
 
     def makeRtp(self, payload, seqnum, marker):
         """RTP-packetize the video data."""

@@ -40,6 +40,7 @@ class Client:
         self.requestSent = -1
         self.teardownAcked = 0
 
+        self.rtspSocket = None
         self.rtpSocket = None
 
         # Reassembly state
@@ -49,17 +50,22 @@ class Client:
 
         # Client-side caching / jitter buffer
         self.frameBuffer = deque()
-        self.bufferSize = 30          # N frames to prebuffer
-        self.playIntervalMs = 40      # ~25fps
+        self.bufferSize = 60          # số frame cần prebuffer
+        self.playIntervalMs = 16      # 60 fps
 
-        # Stats
+        # Stats (packet/frame)
         self.totalPackets = 0
         self.lostPackets = 0
-        self.framesCompleted = 0      # frames đã cache được
+        self.framesCompleted = 0      # frames đã cache được (TỔNG đã buffered)
         self.framesDropped = 0
         self.bytesReceived = 0
         self.playStartTime = None
-        self.playedFrames = 0         # frames đã phát (để vẽ progress)
+        self.playedFrames = 0         # frames đã phát (để hiển thị)
+
+        # Hybrid progress: byte-based
+        self.totalFileBytes = None    # set nếu server gửi "FileSize: <bytes>"
+        self.bytesBuffered = 0        # tổng byte của frame trong buffer
+        self.bytesPlayed = 0          # tổng byte của frame đã play
 
         self.playEvent = threading.Event()
 
@@ -97,10 +103,14 @@ class Client:
         self.status = Label(self.master, text="INIT", anchor="w")
         self.status.grid(row=1, column=0, columnspan=4, sticky=W, padx=5)
 
-        # Progress bar giống YouTube (Canvas)
-        self.progressCanvas = Canvas(self.master, width=400, height=8,
-                                     bg="#333333", highlightthickness=0)
-        self.progressCanvas.grid(row=3, column=0, columnspan=4, pady=(0, 5))
+        #  label hiển thị thông số
+        self.infoLabel = Label(
+            self.master,
+            text="Played: 0 | In-buffer: 0 |  TotalLive: 0 | Total buffered: 0",
+            anchor="w",
+            font=("Consolas", 10)
+        )
+        self.infoLabel.grid(row=3, column=0, columnspan=4, sticky=W, padx=5, pady=(0, 5))
 
     # ----------------------------------------------------
     # Button handlers
@@ -142,10 +152,16 @@ class Client:
                 if self.teardownAcked:
                     break
                 continue
+            except Exception:
+                break
 
             self.bytesReceived += len(packet)
             rtp = RtpPacket()
-            rtp.decode(packet)
+            try:
+                rtp.decode(packet)
+            except Exception as e:
+                print(f"[RTP] decode error: {e}")
+                continue
 
             seq = rtp.seqNum()
             payload = rtp.getPayload()
@@ -172,12 +188,19 @@ class Client:
                 # end-of-frame
                 if not self.frameCorrupted and self.currentFrameData:
                     frameBytes = bytes(self.currentFrameData)
+                    # Bỏ frame cũ nhất nếu buffer quá đầy để giữ latency thấp
                     if len(self.frameBuffer) >= self.bufferSize:
-                        # Bỏ frame cũ nhất để giữ latency thấp
-                        self.frameBuffer.popleft()
+                        old = self.frameBuffer.popleft()
+                        self.bytesBuffered -= len(old)
+                        if self.bytesBuffered < 0:
+                            self.bytesBuffered = 0
+
                     self.frameBuffer.append(frameBytes)
+                    self.bytesBuffered += len(frameBytes)
                     self.framesCompleted += 1
-                    print(f"[CACHE] frame {self.framesCompleted} cached")
+                    print(f"[CACHE] frame {self.framesCompleted} cached "
+                          f"(buffer={len(self.frameBuffer)} frames, "
+                          f"{self.bytesBuffered/1024:.1f} KB)")
                 else:
                     self.framesDropped += 1
                     print("[CACHE] Drop corrupted frame")
@@ -186,16 +209,16 @@ class Client:
                 self.currentFrameData = bytearray()
                 self.frameCorrupted = False
 
-                # PREBUFFERING
-                
+                # PREBUFFERING 
                 if self.state == self.PREBUFFERING and len(self.frameBuffer) >= self.bufferSize:
                     print("[CACHE] Prebuffer OK → START PLAYING FROM BUFFER")
                     self.state = self.PLAYING
-                    self.status.config(text=f"PLAYING (buffer={len(self.frameBuffer)})")
+                    self.status.config(
+                        text=f"PLAYING")
                     if self.playStartTime is None:
                         self.playStartTime = time.time()
 
-                # update progress bar khi cache thêm frame
+                # update progress
                 self.updateProgressBar()
 
     # ----------------------------------------------------
@@ -205,11 +228,19 @@ class Client:
         if self.state == self.PLAYING and self.frameBuffer:
             frameBytes = self.frameBuffer.popleft()
             self.playedFrames += 1
+
+            # Hybrid byte-based
+            self.bytesPlayed += len(frameBytes)
+            self.bytesBuffered -= len(frameBytes)
+            if self.bytesBuffered < 0:
+                self.bytesBuffered = 0
+
             imageFile = self.writeFrame(frameBytes)
             self.updateMovie(imageFile)
             self.status.config(
-                text=f"PLAYING (played={self.playedFrames}, buffer={len(self.frameBuffer)})"
+                text=f"PLAYING"
             )
+            # update “progress” 
             self.updateProgressBar()
 
         self.master.after(self.playIntervalMs, self.playbackLoop)
@@ -232,38 +263,15 @@ class Client:
     # Progress bar
     # ----------------------------------------------------
     def updateProgressBar(self):
-
-        if not self.progressCanvas:
+        """Hiển thị số liệu."""
+        if not hasattr(self, "infoLabel") or self.infoLabel is None:
             return
-
-        w = int(self.progressCanvas["width"])
-        h = int(self.progressCanvas["height"])
-
-        self.progressCanvas.delete("all")
-
-        total = max(1, self.framesCompleted)   # tổng frame đã cache được
         played = self.playedFrames
-        buffered = self.playedFrames + len(self.frameBuffer)
-
-        # clamp
-        if played > total:
-            played = total
-        if buffered > total:
-            buffered = total
-
-        played_ratio = played / total
-        buffered_ratio = buffered / total
-
-        played_x = int(w * played_ratio)
-        buff_x = int(w * buffered_ratio)
-
-        # buffered part
-        self.progressCanvas.create_rectangle(
-            0, 0, buff_x, h, fill="#777777", width=0
-        )
-        # played part
-        self.progressCanvas.create_rectangle(
-            0, 0, played_x, h, fill="#ff0000", width=0
+        inbuf = len(self.frameBuffer)
+        totalLive = played + inbuf
+        totalbuf = self.framesCompleted
+        self.infoLabel.config(
+            text=f"Played: {played}  |  In-buffer: {inbuf}  |  Total Live: {totalLive}  |  Total buffered: {totalbuf}"
         )
 
     # ----------------------------------------------------
@@ -274,7 +282,7 @@ class Client:
         try:
             self.rtspSocket.connect((self.serverAddr, self.serverPort))
             print(f"Connected to server {self.serverAddr}:{self.serverPort}")
-        except:
+        except Exception:
             tkMessageBox.showwarning(
                 'Connection Failed',
                 'Connection to \'%s\' failed.' % self.serverAddr)
@@ -316,7 +324,11 @@ class Client:
 
     def recvRtspReply(self):
         while True:
-            reply = self.rtspSocket.recv(1024)
+            try:
+                reply = self.rtspSocket.recv(1024)
+            except Exception:
+                break
+
             if reply:
                 self.parseRtspReply(reply.decode("utf-8"))
             if self.requestSent == self.TEARDOWN:
@@ -338,23 +350,43 @@ class Client:
             return
         status_code = int(status_line[1])
 
+        # CSeq
         seq_num = None
         for line in lines:
             if line.startswith('CSeq:'):
                 parts = line.split(' ')
                 if len(parts) > 1:
-                    seq_num = int(parts[1])
+                    try:
+                        seq_num = int(parts[1])
+                    except:
+                        seq_num = None
                 break
 
         if seq_num is None or seq_num != self.rtspSeq:
             return
 
+        # Session
         session_id = None
         for line in lines:
             if line.startswith('Session:'):
                 parts = line.split(' ')
                 if len(parts) > 1:
-                    session_id = int(parts[1])
+                    try:
+                        session_id = int(parts[1])
+                    except:
+                        session_id = None
+                break
+
+        # Hybrid: đọc FileSize nếu có
+        for line in lines:
+            if line.startswith('FileSize:'):
+                parts = line.split(' ')
+                if len(parts) > 1:
+                    try:
+                        self.totalFileBytes = int(parts[1])
+                        print(f"[RTSP] Total file bytes = {self.totalFileBytes}")
+                    except:
+                        self.totalFileBytes = None
                 break
 
         if status_code == 200:
@@ -392,7 +424,7 @@ class Client:
         try:
             self.rtpSocket.bind(('', self.rtpPort))
             print(f"RTP port {self.rtpPort} opened successfully")
-        except:
+        except Exception:
             tkMessageBox.showwarning(
                 'Unable to Bind',
                 'Unable to bind PORT=%d' % self.rtpPort)
@@ -408,6 +440,10 @@ class Client:
     # Stats: frame loss + network usage
     # ----------------------------------------------------
     def printStats(self):
+        # Nếu chưa stream gì thì khỏi in
+        if self.totalPackets == 0 and self.framesCompleted == 0 and self.framesDropped == 0:
+            return
+
         print("\n========== CLIENT STATS ==========")
         print(f"Total RTP packets received : {self.totalPackets}")
         print(f"Estimated packets lost     : {self.lostPackets}")
