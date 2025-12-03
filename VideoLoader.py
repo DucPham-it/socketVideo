@@ -1,12 +1,8 @@
-# VideoLoader.py
 from VideoStream import VideoStream
 from VideoStreamHD import VideoStreamHD
 
 def is_basic_mjpeg(filename):
-    """
-    Basic format lab: 5 byte đầu là ASCII digits ('0'..'9').
-    HD/raw MJPEG: thường không như vậy.
-    """
+    """5 byte đầu là ASCII digits => dạng MJPEG basic của lab."""
     with open(filename, 'rb') as f:
         first5 = f.read(5)
         if len(first5) < 5:
