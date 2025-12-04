@@ -15,7 +15,7 @@ Client Python mô phỏng hệ thống **streaming video thời gian thực**, h
 
 Client gồm bốn thành phần chính:
 
-### ***1*** ** RTSP Controller**
+###  `1` **- RTSP Controller**
 - Gửi lệnh RTSP  
 - Nhận phản hồi và cập nhật trạng thái: INIT → READY → PREBUFFERING → PLAYING  
 - Quản lý session ID, CSeq
