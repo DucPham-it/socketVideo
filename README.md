@@ -15,25 +15,25 @@ Client Python mô phỏng hệ thống **streaming video thời gian thực**, h
 
 Client gồm bốn thành phần chính:
 
-###  `1` **- RTSP Controller**
+### 1. RTSP Controller
 - Gửi lệnh RTSP  
 - Nhận phản hồi và cập nhật trạng thái: INIT → READY → PREBUFFERING → PLAYING  
 - Quản lý session ID, CSeq
 
-### `2` **- RTP Receiver + Frame Reassembly**
+### 2. RTP Receiver + Frame Reassembly
 - Nhận RTP qua UDP  
 - Kiểm tra sequence number, packet loss  
 - Ghép payload thành frame JPEG  
 - Marker bit (`1`) đánh dấu packet cuối của frame  
 - Drop frame nếu phát hiện mất gói trong cùng frame
 
-### `3` **- Jitter Buffer (Frame Queue)**
+### 3. Jitter Buffer (Frame Queue)
 - Cấu trúc: `deque()`  
 - Dung lượng mặc định: **30 frames**  
 - PREBUFFERING cho đến khi buffer đủ 30 frames  
 - Playback luôn đều 40ms/frame (25 FPS)
 
-### `4` **- Playback/UI (Tkinter + PIL)**
+### 4. Playback/UI (Tkinter + PIL)
 - Hiển thị video từ file tạm `cache-<session>.jpg`  
 - Nút điều khiển: Setup / Play / Pause / Teardown  
 - Nhãn thống kê realtime: Played / In-buffer / Total buffered  
