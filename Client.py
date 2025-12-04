@@ -50,8 +50,8 @@ class Client:
 
         # Client-side caching / jitter buffer
         self.frameBuffer = deque()
-        self.bufferSize = 60          # số frame cần prebuffer
-        self.playIntervalMs = 16      # 60 fps
+        self.bufferSize = 30         # số frame cần prebuffer
+        self.playIntervalMs = 40     # 25
 
         # Stats (packet/frame)
         self.totalPackets = 0
@@ -62,14 +62,9 @@ class Client:
         self.playStartTime = None
         self.playedFrames = 0         # frames đã phát (để hiển thị)
 
-        # Hybrid progress: byte-based
-        self.totalFileBytes = None    # set nếu server gửi "FileSize: <bytes>"
-        self.bytesBuffered = 0        # tổng byte của frame trong buffer
-        self.bytesPlayed = 0          # tổng byte của frame đã play
-
         self.playEvent = threading.Event()
 
-        # Smooth playback loop
+        # Playback loop
         self.master.after(self.playIntervalMs, self.playbackLoop)
 
         self.connectToServer()
@@ -95,7 +90,14 @@ class Client:
         self.teardown.grid(row=2, column=3, padx=2, pady=2)
 
         # Video frame
-        self.label = Label(self.master, height=19)
+        self.master.rowconfigure(0, weight=1)
+        self.master.columnconfigure(0, weight=1)
+        self.master.columnconfigure(1, weight=1)
+        self.master.columnconfigure(2, weight=1)
+        self.master.columnconfigure(3, weight=1)
+
+        # Label hiển thị video
+        self.label = Label(self.master)
         self.label.grid(row=0, column=0, columnspan=4,
                         sticky=W + E + N + S, padx=5, pady=5)
 
@@ -191,16 +193,11 @@ class Client:
                     # Bỏ frame cũ nhất nếu buffer quá đầy để giữ latency thấp
                     if len(self.frameBuffer) >= self.bufferSize:
                         old = self.frameBuffer.popleft()
-                        self.bytesBuffered -= len(old)
-                        if self.bytesBuffered < 0:
-                            self.bytesBuffered = 0
 
                     self.frameBuffer.append(frameBytes)
-                    self.bytesBuffered += len(frameBytes)
                     self.framesCompleted += 1
                     print(f"[CACHE] frame {self.framesCompleted} cached "
-                          f"(buffer={len(self.frameBuffer)} frames, "
-                          f"{self.bytesBuffered/1024:.1f} KB)")
+                          f"(buffer={len(self.frameBuffer)} frames)")
                 else:
                     self.framesDropped += 1
                     print("[CACHE] Drop corrupted frame")
@@ -222,18 +219,12 @@ class Client:
                 self.updateProgressBar()
 
     # ----------------------------------------------------
-    # Smooth playback from buffer
+    # Playback from buffer
     # ----------------------------------------------------
     def playbackLoop(self):
         if self.state == self.PLAYING and self.frameBuffer:
             frameBytes = self.frameBuffer.popleft()
             self.playedFrames += 1
-
-            # Hybrid byte-based
-            self.bytesPlayed += len(frameBytes)
-            self.bytesBuffered -= len(frameBytes)
-            if self.bytesBuffered < 0:
-                self.bytesBuffered = 0
 
             imageFile = self.writeFrame(frameBytes)
             self.updateMovie(imageFile)
@@ -377,17 +368,7 @@ class Client:
                         session_id = None
                 break
 
-        # Hybrid: đọc FileSize nếu có
-        for line in lines:
-            if line.startswith('FileSize:'):
-                parts = line.split(' ')
-                if len(parts) > 1:
-                    try:
-                        self.totalFileBytes = int(parts[1])
-                        print(f"[RTSP] Total file bytes = {self.totalFileBytes}")
-                    except:
-                        self.totalFileBytes = None
-                break
+
 
         if status_code == 200:
             if self.requestSent == self.SETUP:
