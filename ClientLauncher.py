@@ -12,8 +12,11 @@ if __name__ == "__main__":
 		print("[Usage: ClientLauncher.py Server_name Server_port RTP_port Video_file]\n")	
 	
 	root = Tk()
-	
+	root.title("RTPClient")
+
+	root.geometry("1280x720")
+
 	# Create a new client
 	app = Client(root, serverAddr, serverPort, rtpPort, fileName)
-	app.master.title("RTPClient")	
+
 	root.mainloop()
