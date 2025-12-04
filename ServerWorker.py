@@ -111,7 +111,7 @@ class ServerWorker:
     def sendRtp(self):
         """Send RTP packets over UDP (multi-packet per frame cho HD)."""
         while True:
-            self.clientInfo['event'].wait(0.04)  # ~25 FPS
+            self.clientInfo['event'].wait(0.04)  
             
             if self.clientInfo['event'].isSet():
                 break 
