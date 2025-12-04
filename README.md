@@ -15,7 +15,7 @@ Client Python mô phỏng hệ thống **streaming video thời gian thực**, h
 
 Client gồm bốn thành phần chính:
 
-### **1️⃣ RTSP Controller**
+### **$1$ RTSP Controller**
 - Gửi lệnh RTSP  
 - Nhận phản hồi và cập nhật trạng thái: INIT → READY → PREBUFFERING → PLAYING  
 - Quản lý session ID, CSeq
@@ -140,6 +140,7 @@ Các thống kê giúp đánh giá chất lượng đường truyền.
 
 ### Chạy Client:
 `python3 ClientLauncher.py <server_ip> <server_port> <rtp_port> <video_file>`
+
 ví dụ:
 `python3 ClientLauncher.py 127.0.0.1 8554 5000 movie.mjpeg`
 
