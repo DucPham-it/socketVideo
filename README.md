@@ -1,139 +1,178 @@
-## 1. Mục tiêu
-Dự án mô phỏng hệ thống **streaming video thời gian thực** sử dụng:
-- **Giao thức RTSP (TCP)** để điều khiển (SETUP / PLAY / PAUSE / TEARDOWN).
-- **Giao thức RTP (UDP)** để truyền dữ liệu video.
-- **Jitter buffer client-side** để phát lại mượt trên đường truyền không ổn định.
-- **Fragmented RTP per frame** (chia frame thành nhiều packet) để truyền video HD / khung hình lớn.
+# 🎬 Real-Time MJPEG Streaming Client (RTSP + RTP Fragmentation)
 
-- Hỗ trợ file MJPEG HD thật (JPEG toàn vẹn với SOI–EOI)
-- Reassembly packet theo `marker bit`
-- Thanh progress 
-- Thống kê network (packet loss, frame loss, bitrate)
+Client Python mô phỏng hệ thống **streaming video thời gian thực**, hỗ trợ:
 
----
-
-## 2. Kiến trúc toàn hệ thống
-
-### 2.1 Thành phần hệ thống
-
-#### 1️⃣ Client
-- Giao diện Tkinter
-- Nhận gói RTP
-- **Ghép (reassemble)** từng frame từ nhiều packet
-- Cache frame → Playback mượt
-- Điều khiển RTSP
-
-Mã chính nằm trong **Client.py**
-
-#### 2️⃣ Server
-- Lắng nghe RTSP (TCP)
-- Load video (Basic hoặc HD MJPEG)
-- Gửi frame → chia thành nhiều packet
-- Gửi qua UDP đến Client
-
-#### 3️⃣ Video Loader
-Tự động detect loại file:
-- MJPEG Basic Lab → **VideoStream**
-- MJPEG HD Real JPEG → **VideoStreamHD**
+- **RTSP/TCP** cho điều khiển: SETUP / PLAY / PAUSE / TEARDOWN  
+- **RTP/UDP + phân mảnh payload từng frame (fragmentation)**  
+- **Reassembly packet → JPEG hoàn chỉnh**  
+- **Jitter buffer 30 frames** để phát mượt khi mạng không ổn định  
+- **Progress bar dạng thông số**  
+- **Thống kê network khi teardown**  
 
 ---
 
-## 3. Định dạng video
+## 1. Kiến trúc tổng quan
 
-### 3.1 MJPEG Basic
-Cấu trúc mỗi frame: [5 byte ASCII length] [JPEG data]
+Client gồm bốn thành phần chính:
 
+### **1️⃣ RTSP Controller**
+- Gửi lệnh RTSP  
+- Nhận phản hồi và cập nhật trạng thái: INIT → READY → PREBUFFERING → PLAYING  
+- Quản lý session ID, CSeq
 
-### 3.2 MJPEG HD (True JPEG)
-File có các marker JPEG:
-- SOI = `FF D8`
-- EOI = `FF D9`
+### **2️⃣ RTP Receiver + Frame Reassembly**
+- Nhận RTP qua UDP  
+- Kiểm tra sequence number, packet loss  
+- Ghép payload thành frame JPEG  
+- Marker bit (`1`) đánh dấu packet cuối của frame  
+- Drop frame nếu phát hiện mất gói trong cùng frame
 
----
+### **3️⃣ Jitter Buffer (Frame Queue)**
+- Cấu trúc: `deque()`  
+- Dung lượng mặc định: **30 frames**  
+- PREBUFFERING cho đến khi buffer đủ 30 frames  
+- Playback luôn đều 40ms/frame (25 FPS)
 
-## 4. Giao thức RTSP
-
-### Chuỗi lệnh theo trạng thái
-INIT ──SETUP──▶ READY ─ PLAY ─▶ PREBUFFERING ─ sufficient N frame ─▶ PLAYING
-
----
-
-## 5. RTP Layer
-
-### 5.1 RTP Packet Format
-Header 12 byte gồm:
-- Version 2
-- Sequence number (16 bit)
-- Timestamp (32 bit)
-- **Marker bit** (đánh dấu packet cuối của frame)
-- Payload: dữ liệu JPEG.
+### **4️⃣ Playback/UI (Tkinter + PIL)**
+- Hiển thị video từ file tạm `cache-<session>.jpg`  
+- Nút điều khiển: Setup / Play / Pause / Teardown  
+- Nhãn thống kê realtime: Played / In-buffer / Total buffered  
 
 ---
 
-## 6. Xử lý phía server
+## 2. Luồng hoạt động
+INIT → SETUP → READY → PLAY → PREBUFFERING → PLAYING
 
-### 6.1 Phân mảnh RTP
-Server **không truyền 1 frame = 1 RTP**, mà:
+### Mô tả nhanh:
 
-frame JPEG → chia thành nhiều packet < MTU (1300)
-packet cuối đặt marker = 1
-
-
-### 6.2 Vòng send frame (25fps)
-event.wait(0.04)
----
-
-## 7. Xử lý phía client
-
-### 7.1 Buffering 30 frame
-- Frame loss → drop toàn bộ frame
-- Khi nhận packet marker=1 → kết thúc frame
-
-### 7.2 PREBUFFERING → PLAYING
-Chỉ khi đủ 30 frame:
-buffer >= bufferSize → PLAYING
-
-
-### 7.3 Playback Scheduler
-every 40ms → pop 1 frame → update GUI
+- **SETUP**: mở RTSP session, bind RTP port  
+- **PLAY**: chuyển sang PREBUFFERING → nhận frame nhưng chưa phát  
+- Khi buffer đủ 30 frames → chuyển sang **PLAYING**  
+- **PLAYING**: 40ms → phát 1 frame từ buffer  
+- **PAUSE**: dừng playback nhưng giữ session  
+- **TEARDOWN**: đóng session + xuất thống kê
 
 ---
 
-## 8. Thanh progress giống YouTube
+## 3. RTP Fragmentation & Reassembly
 
-- Xám = buffered
-- Đỏ = đã play
+### Server gửi (yêu cầu server phải hỗ trợ):
+Frame JPEG → chia thành nhiều RTP packet (<1300 bytes)
+Packet cuối → marker = 1
 
----
-
-## 9. Thống kê mạng (Stats)
-
-Khi Teardown:
-- Tổng packet nhận
-- Packet loss rate
-- Frame dropped
-- Bitrate thực tế
-
----
-
-## 10. Cách chạy
-
-### Server:
-python3 Server.py <Server Port>
-
-### Client:
-python3 ClientLauncher.py <server_ip> <server_port> <rtp_port> <video_file>
+### Client xử lý:
+- Kiểm tra thứ tự gói (sequence number)  
+- Nếu mất packet → flag `frameCorrupted = True`  
+- Append payload vào `currentFrameData`  
+- Khi gặp marker = 1:
+  - Nếu không lỗi → đưa frame vào `frameBuffer`
+  - Nếu lỗi → tăng bộ đếm dropped  
+- Reset trạng thái để nhận frame tiếp theo
 
 ---
 
-## 11. Test và đánh giá
-- Streaming ổn định
-- Prebuffer=30 giúp giảm jitter
-- HD → 3–10 packet/frame
+## 4. Jitter Buffer & Playback
+
+### Jitter Buffer (deque)
+- Ngăn xếp FIFO lưu các frame đã hoàn chỉnh  
+- Nếu đầy → drop frame cũ nhất (giảm latency)
+
+### Playback Loop (40ms)
+- Nếu đang PLAYING:  
+  - Pop 1 frame  
+  - Ghi ra file cache  
+  - Hiển thị bằng Tkinter  
+  - Cập nhật số liệu Played / In-buffer  
 
 ---
 
-# 🎯 Kết luận
-Dự án minh họa pipeline truyền video real-time có jitter.
-Client phát theo buffer + timer thay vì tốc độ mạng → playback mượt.
+## 5. Giao diện người dùng
 
+### Nút điều khiển:
+- **Setup**
+- **Play**
+- **Pause**
+- **Teardown**
+
+### Label chính:
+- Khung hiển thị video  
+- Trạng thái RTSP: INIT / READY / PREBUFFERING / PLAYING  
+- Thông số:
+Played: X | In-buffer: Y | Total live: X+Y | Total buffered: Z
+
+---
+
+## 6. RTSP Layer
+
+### Ví dụ lệnh gửi:
+SETUP movie.MJPEG RTSP/1.0
+CSeq: 1
+Transport: RTP/UDP; client_port=5000
+
+### PLAY:
+PLAY movie.MJPEG RTSP/1.0
+CSeq: 2
+Session: 12345
+
+### PAUSE / TEARDOWN tương tự.
+
+---
+
+## 7. Thống kê mạng (in ra khi TEARDOWN)
+
+Client in ra:
+
+Total RTP packets received
+Packets lost (ước lượng)
+Packet loss rate %
+Frames completed
+Frames dropped
+Frame loss rate %
+Playback time
+Approx. received bitrate (kbps)
+
+
+Các thống kê giúp đánh giá chất lượng đường truyền.
+
+---
+
+## 8. Cách chạy
+
+### Chạy Client:
+`python3 ClientLauncher.py <server_ip> <server_port> <rtp_port> <video_file>`
+ví dụ:
+`python3 ClientLauncher.py 127.0.0.1 8554 5000 movie.mjpeg`
+
+### Server yêu cầu:
+- Trả về video MJPEG đã phân mảnh RTP  
+- Đặt marker bit = 1 cho packet cuối frame  
+- Tăng sequence number đúng chuẩn  
+
+---
+
+## 9. Cache Frame
+
+Client ghi frame mới nhất vào:
+`cache-<session>.jpg`
+
+File sẽ bị ghi đè liên tục và bị xóa khi teardown.
+
+---
+
+## 10. Kết luận
+
+Hệ thống streaming này tái hiện pipeline thực tế:
+
+- RTSP điều khiển phiên  
+- RTP gửi video phân mảnh  
+- Reassembly phía client  
+- Jitter buffer để phát mượt  
+- Playback tách biệt hoàn toàn tốc độ mạng  
+
+Dễ sử dụng, dễ mở rộng sang:
+- Adaptive Bitrate  
+- FEC / retransmission  
+- Timeline dạng YouTube  
+- Buffer visualization  
+
+---
